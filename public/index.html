@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlashBite · Campus Peak Food</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-slow {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.04); opacity: 0.9; }
+    }
+    .pulse-ready { animation: pulse-slow 1.5s infinite; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-emerald-700 text-white px-4 py-3 shadow flex justify-between items-center sticky top-0 z-50">
+    <div>
+      <h1 class="text-lg font-bold tracking-tight">FlashBite ⚡</h1>
+      <p class="text-xs text-emerald-100">P20 · Campus Peak-Hour Express</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="toggleRoleBtn" onclick="toggleRole()" class="text-xs bg-emerald-900 hover:bg-emerald-950 px-3 py-1.5 rounded-full font-medium transition">
+        Switch to Vendor Desk
+      </button>
+    </div>
+  </header>
+
+  <!-- STUDENT VIEW -->
+  <main id="studentView" class="max-w-md mx-auto p-4 pb-28">
+    <!-- Active Token Banner (shown if an active order exists) -->
+    <div id="activeTokenCard" class="hidden mb-4 p-4 rounded-xl border bg-white shadow-sm"></div>
+
+    <!-- Live Status Explainer -->
+    <div class="mb-4 bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs text-emerald-900 flex items-start gap-2">
+      <span class="text-base">⏱️</span>
+      <div>
+        <span class="font-bold">Next Break Window: 10 mins.</span> Pick items from the <strong>Ready Now</strong> section for 20-second counter handoff.
+      </div>
+    </div>
+
+    <!-- Menu Section 1: Grab & Go -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-ping"></span>
+          Ready Now (Grab &amp; Go &lt; 30s)
+        </h2>
+      </div>
+      <div id="readyList" class="space-y-2"></div>
+    </div>
+
+    <!-- Menu Section 2: Cook to Order -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-sm font-bold uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
+          Cook-to-Order (6–10 Min Wait)
+        </h2>
+      </div>
+      <div id="customList" class="space-y-2"></div>
+    </div>
+
+    <!-- Persistent Bottom Bar -->
+    <div id="cartBar" class="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 backdrop-blur border-t shadow-lg flex items-center justify-between z-40">
+      <div>
+        <p class="text-xs text-slate-500" id="cartCount">0 items selected</p>
+        <p class="text-lg font-black text-slate-900" id="cartTotal">₹0</p>
+      </div>
+      <button onclick="placeOrder()" id="payBtn" disabled class="bg-emerald-600 disabled:bg-slate-300 text-white font-bold text-sm px-5 py-2.5 rounded-xl transition shadow">
+        Order &amp; Get Flash Pass
+      </button>
+    </div>
+  </main>
+
+  <!-- VENDOR / COUNTER OPERATOR VIEW -->
+  <main id="vendorView" class="hidden max-w-4xl mx-auto p-4">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6">
+      <div>
+        <h2 class="text-xl font-black text-slate-900">Counter Queue &amp; Fulfillment Desk</h2>
+        <p class="text-xs text-slate-500">Live order queue for the 15-minute rush window</p>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="fetchOrders()" class="text-xs bg-slate-200 hover:bg-slate-300 font-semibold px-3 py-1.5 rounded-lg">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Stock Toggle Drawer -->
+    <div class="bg-white p-3 rounded-xl border mb-6 shadow-sm">
+      <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Quick Inventory Availability Toggle (One-Tap)</h3>
+      <div id="vendorStockList" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <!-- Incoming Orders Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="ordersGrid"></div>
+  </main>
+
+  <script>
+    let currentRole = 'student'; // 'student' or 'vendor'
+    let menuData = [];
+    let cart = {}; // itemId -> quantity
+    let currentOrder = null;
+    let pollInterval = null;
+
+    async function init() {
+      await fetchMenu();
+      renderStudentMenu();
+      renderVendorStock();
+    }
+
+    async function fetchMenu() {
+      try {
+        const res = await fetch('/api/menu');
+        menuData = await res.json();
+      } catch (err) {
+        console.error("Failed to load menu", err);
+      }
+    }
+
+    function toggleRole() {
+      currentRole = currentRole === 'student' ? 'vendor' : 'student';
+      document.getElementById('toggleRoleBtn').innerText = currentRole === 'student' ? 'Switch to Vendor Desk' : 'Switch to Student View';
+      
+      if (currentRole === 'student') {
+        document.getElementById('studentView').classList.remove('hidden');
+        document.getElementById('vendorView').classList.add('hidden');
+      } else {
+        document.getElementById('studentView').classList.add('hidden');
+        document.getElementById('vendorView').classList.remove('hidden');
+        fetchOrders();
+      }
+    }
+
+    function renderStudentMenu() {
+      const readyContainer = document.getElementById('readyList');
+      const customContainer = document.getElementById('customList');
+      readyContainer.innerHTML = '';
+      customContainer.innerHTML = '';
+
+      menuData.forEach(item => {
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border flex items-center justify-between ${
+          item.available ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100 opacity-50'
+        }`;
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-sm text-slate-900">${item.name}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold ${item.category === 'ready' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                ${item.prepTime}
+              </span>
+            </div>
+            <p class="text-xs font-semibold text-slate-600 mt-0.5">₹${item.price}</p>
+          </div>
+          <div>
+            ${item.available ? `
+              <div class="flex items-center gap-2">
+                <button onclick="updateCart(${item.id}, -1)" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700 flex items-center justify-center">-</button>
+                <span class="text-sm font-bold w-4 text-center" id="qty-${item.id}">${cart[item.id] || 0}</span>
+                <button onclick="updateCart(${item.id}, 1)" class="w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-700 font-bold text-white flex items-center justify-center">+</button>
+              </div>
+            ` : `<span class="text-xs font-medium text-slate-400">Sold Out</span>`}
+          </div>
+        `;
+
+        if (item.category === 'ready') {
+          readyContainer.appendChild(card);
+        } else {
+          customContainer.appendChild(card);
+        }
+      });
+      updateCartBar();
+    }
+
+    function updateCart(itemId, delta) {
+      cart[itemId] = (cart[itemId] || 0) + delta;
+      if (cart[itemId] <= 0) delete cart[itemId];
+      const el = document.getElementById(`qty-${itemId}`);
+      if (el) el.innerText = cart[itemId] || 0;
+      updateCartBar();
+    }
+
+    function updateCartBar() {
+      let count = 0;
+      let total = 0;
+      Object.keys(cart).forEach(id => {
+        const item = menuData.find(m => m.id == id);
+        if (item) {
+          count += cart[id];
+          total += item.price * cart[id];
+        }
+      });
+
+      document.getElementById('cartCount').innerText = `${count} item${count === 1 ? '' : 's'} selected`;
+      document.getElementById('cartTotal').innerText = `₹${total}`;
+      document.getElementById('payBtn').disabled = count === 0;
+    }
+
+    async function placeOrder() {
+      const items = Object.keys(cart).map(id => {
+        const item = menuData.find(m => m.id == id);
+        return { id: item.id, name: item.name, price: item.price, quantity: cart[id] };
+      });
+
+      const totalAmount = items.reduce((acc, cur) => acc + cur.price * cur.quantity, 0);
+
+      try {
+        const res = await fetch('/api/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentIdentifier: 'Hostel 4 / Roll 4', items, totalAmount })
+        });
+        const order = await res.json();
+        currentOrder = order;
+        cart = {};
+        renderStudentMenu();
+        showFlashToken(order);
+        startPollingOrder(order.id);
+      } catch (err) {
+        alert('Failed to place order. Please try again.');
+      }
+    }
+
+    function showFlashToken(order) {
+      const card = document.getElementById('activeTokenCard');
+      card.classList.remove('hidden');
+
+      const isReady = order.status === 'READY';
+      const isCollected = order.status === 'COLLECTED';
+
+      card.className = `mb-4 p-5 rounded-2xl border text-center transition-all shadow-md ${
+        isReady ? 'bg-emerald-500 text-white pulse-ready border-emerald-600' :
+        isCollected ? 'bg-slate-100 text-slate-600 border-slate-200' :
+        'bg-white text-slate-800 border-slate-300'
+      }`;
+
+      card.innerHTML = `
+        <p class="text-xs uppercase font-extrabold tracking-wider ${isReady ? 'text-emerald-100' : 'text-slate-400'}">
+          ${isReady ? '⚡ YOUR ORDER IS PACKED & READY!' : isCollected ? 'Order Complete' : 'Order Queued at Counter'}
+        </p>
+        <div class="my-2 text-4xl font-black tracking-tight font-mono">
+          #${order.token}
+        </div>
+        <p class="text-xs ${isReady ? 'text-emerald-100' : 'text-slate-500'}">
+          ${isReady ? 'Flash this screen at the Express Pickup Ledge to collect.' : 'Estimated Wait: ~60-90 seconds. Keep this screen open.'}
+        </p>
+        <div class="mt-3 text-xs border-t pt-2 ${isReady ? 'border-emerald-400 text-emerald-100' : 'border-slate-100 text-slate-500'}">
+          ${order.items.map(i => `${i.quantity}x ${i.name}`).join(' · ')} (₹${order.totalAmount})
+        </div>
+      `;
+    }
+
+    function startPollingOrder(orderId) {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/orders/${orderId}`);
+          if (res.ok) {
+            const updated = await res.json();
+            currentOrder = updated;
+            showFlashToken(updated);
+            if (updated.status === 'COLLECTED') {
+              clearInterval(pollInterval);
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 2500);
+    }
+
+    // VENDOR ACTIONS
+    async function fetchOrders() {
+      try {
+        const res = await fetch('/api/orders');
+        const orders = await res.json();
+        renderVendorOrders(orders);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderVendorOrders(orders) {
+      const container = document.getElementById('ordersGrid');
+      container.innerHTML = '';
+
+      if (orders.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400 italic">No incoming orders yet.</p>`;
+        return;
+      }
+
+      orders.forEach(order => {
+        if (order.status === 'COLLECTED') return;
+
+        const card = document.createElement('div');
+        const isReady = order.status === 'READY';
+        card.className = `p-4 rounded-xl border bg-white shadow-sm flex flex-col justify-between ${
+          isReady ? 'border-emerald-400 bg-emerald-50/40' : 'border-slate-200'
+        }`;
+
+        card.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <span class="text-2xl font-black font-mono text-slate-900">#${order.token}</span>
+              <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                isReady ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }">${order.status}</span>
+            </div>
+            <div class="text-xs text-slate-600 mb-2">
+              ${order.items.map(i => `<div class="font-semibold text-slate-800">• ${i.quantity}x ${i.name}</div>`).join('')}
+            </div>
+            <p class="text-[11px] text-slate-400">Time: ${order.createdAt} · ₹${order.totalAmount}</p>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-100 flex gap-2">
+            ${order.status === 'PLACED' ? `
+              <button onclick="setOrderStatus('${order.id}', 'READY')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-xs">
+                Mark Ready ⚡
+              </button>
+            ` : `
+              <button onclick="setOrderStatus('${order.id}', 'COLLECTED')" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 rounded-lg text-xs">
+                Handover Done ✓
+              </button>
+            `}
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function setOrderStatus(orderId, status) {
+      await fetch(`/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      fetchOrders();
+    }
+
+    function renderVendorStock() {
+      const container = document.getElementById('vendorStockList');
+      container.innerHTML = '';
+      menuData.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = `text-xs px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1.5 transition ${
+          item.available ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-red-50 border-red-300 text-red-700 line-through'
+        }`;
+        btn.innerHTML = `${item.name} (${item.available ? 'In Stock' : 'Out'})`;
+        btn.onclick = async () => {
+          await fetch(`/api/menu/${item.id}/toggle`, { method: 'POST' });
+          await fetchMenu();
+          renderStudentMenu();
+          renderVendorStock();
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    // Auto-refresh vendor orders if on vendor tab
+    setInterval(() => {
+      if (currentRole === 'vendor') fetchOrders();
+    }, 3000);
+
+    init();
+  </script>
+</body>
+</html>
