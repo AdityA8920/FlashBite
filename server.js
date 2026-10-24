@@ -80,6 +80,12 @@ app.patch('/api/orders/:id/status', (req, res) => {
   res.status(400).json({ error: 'Invalid order or status' });
 });
 
-app.listen(PORT, () => {
-  console.log(`FlashBite server running on port ${PORT}`);
-});
+// Start local server if not running in a serverless environment (e.g. Vercel)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`FlashBite server running on port ${PORT}`);
+  });
+}
+
+// Export for Vercel serverless function wrapper
+module.exports = app;
