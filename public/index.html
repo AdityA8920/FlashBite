@@ -101,6 +101,7 @@
 
   <script>
     let currentRole = 'student'; // 'student' or 'vendor'
+    const VENDOR_PIN = '6767';
     let menuData = [];
     let cart = {}; // itemId -> quantity
     let currentOrder = null;
@@ -122,16 +123,32 @@
     }
 
     function toggleRole() {
-      currentRole = currentRole === 'student' ? 'vendor' : 'student';
-      document.getElementById('toggleRoleBtn').innerText = currentRole === 'student' ? 'Switch to Vendor Desk' : 'Switch to Student View';
-      
       if (currentRole === 'student') {
-        document.getElementById('studentView').classList.remove('hidden');
-        document.getElementById('vendorView').classList.add('hidden');
-      } else {
+        const enteredPin = prompt('🔒 Enter Vendor Desk PIN:');
+        
+        // If user cancelled the prompt
+        if (enteredPin === null) {
+          return;
+        }
+
+        // Verify PIN
+        if (enteredPin.trim() !== VENDOR_PIN) {
+          alert('❌ Incorrect PIN! Access denied.');
+          return;
+        }
+
+        // Switch to Vendor
+        currentRole = 'vendor';
+        document.getElementById('toggleRoleBtn').innerText = 'Switch to Student View';
         document.getElementById('studentView').classList.add('hidden');
         document.getElementById('vendorView').classList.remove('hidden');
         fetchOrders();
+      } else {
+        // Switch back to Student View
+        currentRole = 'student';
+        document.getElementById('toggleRoleBtn').innerText = 'Switch to Vendor Desk';
+        document.getElementById('studentView').classList.remove('hidden');
+        document.getElementById('vendorView').classList.add('hidden');
       }
     }
 
